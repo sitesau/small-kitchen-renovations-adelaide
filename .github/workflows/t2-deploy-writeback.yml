@@ -65,12 +65,13 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
         run: |
-          npm install -g netlify-cli >/dev/null 2>&1
+          npm install -g netlify-cli
           PROJECT="${{ steps.meta.outputs.project }}"
-          SID="$(netlify api listSites 2>/dev/null | grep -B5 "\"name\": \"$PROJECT\"" | grep -oE '"site_id": "[0-9a-f-]+"' | head -1 | grep -oE '[0-9a-f-]{36}' || true)"
+          SID="$(netlify api listSites | grep -B5 "\"name\": \"$PROJECT\"" | grep -oE '"site_id": "[0-9a-f-]+"' | head -1 | grep -oE '[0-9a-f-]{36}' || true)"
           if [ -z "$SID" ]; then
-            netlify sites:create --name "$PROJECT" --account-slug moncadaqld >/dev/null 2>&1 || true
-            SID="$(netlify api listSites 2>/dev/null | grep -B5 "\"name\": \"$PROJECT\"" | grep -oE '"site_id": "[0-9a-f-]+"' | head -1 | grep -oE '[0-9a-f-]{36}')"
+            netlify api listAccountsForUser
+            netlify sites:create --name "$PROJECT"
+            SID="$(netlify api listSites | grep -B5 "\"name\": \"$PROJECT\"" | grep -oE '"site_id": "[0-9a-f-]+"' | head -1 | grep -oE '[0-9a-f-]{36}')"
           fi
           [ -n "$SID" ] || { echo "::error::could not resolve Netlify site id for '$PROJECT'"; exit 1; }
           netlify deploy --prod --dir=. --site="$SID"
@@ -80,12 +81,11 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          npm install -g vercel >/dev/null 2>&1
+          npm install -g vercel
           PROJECT="${{ steps.meta.outputs.project }}"
-          DEP_URL="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN" --scope=site-au --name="$PROJECT" 2>/dev/null | tail -1 | tr -d '\r')"
-          if [ -n "$DEP_URL" ]; then
-            vercel alias set "$DEP_URL" "$PROJECT.vercel.app" --token="$VERCEL_TOKEN" --scope=site-au >/dev/null 2>&1 || true
-          fi
+          DEP_URL="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN" --name="$PROJECT" | tail -1 | tr -d '\r')"
+          [ -n "$DEP_URL" ] || { echo "::error::vercel deploy produced no URL for '$PROJECT'"; exit 1; }
+          vercel alias set "$DEP_URL" "$PROJECT.vercel.app" --token="$VERCEL_TOKEN"
 
       - name: Deploy (gcs/s3/ghpages -- not wired yet)
         if: steps.meta.outputs.present == 'true' && contains(fromJSON('["gcs","s3","ghpages"]'), steps.meta.outputs.cloud_host)
@@ -163,7 +163,7 @@ jobs:
             status="in_progress"; done_at_clause=""
           fi
           curl -sf -X PATCH "$rest/t2_build_queue?id=eq.$wheel_id" "${auth[@]}" -H "Prefer: return=minimal" \
-            -d "{\"built_slugs\":$built,\"status\":\"$status\"$done_at_clause}"
+            -d "{\"built_slugs\":$built,\"status\":\"$status\",\"error\":null$done_at_clause}"
 
       - name: Mark failed (deploy or live-check never passed)
         # Broader than "verify failed" -- also catches a deploy step failure
